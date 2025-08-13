@@ -1,0 +1,157 @@
+---- TWO TABLES FOR THE PROJECT : USER PROFILES TABLE AND VIEWERSHIP TABLE
+SELECT * FROM USER_PROFILES; 
+SELECT * FROM VIEWERSHIP;
+
+
+WITH CTE AS (
+        SELECT U.USERID, 
+        ----REMOVING LEADING AND LAGGING UNWANTED SPACE CHARACTERS AND ALSO HAVING UPPER CASE FOR FIRST LETTER AND EVERY FIRST LETTER AFTER A SPACE
+               TRIM(INITCAP(GENDER)) AS GENDER, 
+               TRIM(INITCAP(RACE)) AS RACE, 
+               AGE, 
+               TRIM(INITCAP(PROVINCE)) AS PROVINCE, 
+               TRIM(INITCAP(CHANNEL2)) AS CHANNEL2, 
+        ----TAKING THE FIRST 10 CHARACTERS IN THE RECORDDATE COLUMN WHICH HAS A VARCHAR DATATYPE, REPLACING '/' WITH '-' FOR THE CORRECT FORMAT THEN CHANGING THE DATA TYPE TO A DATE DATATYPE 
+               TO_DATE(REPLACE(LEFT(RECORDDATE2, 10),'/','-')) AS RECORD_DATE,
+        ----TAKING THE LAST 5 CHARACTERS IN THE RECORDDATE COLUMN WHICH IN A VARCHAR DATA TYPE AND CHANGING IT TO TIME DATA TYPE IN A SEPARATE COLUMN
+               CAST(RIGHT(RECORDDATE2, 5) AS TIME) AS RECORD_TIME,
+               DURATION_2 AS DURATION
+        FROM USER_PROFILES AS U
+        ----JOINING THE TWO TABLES TOGETHER USING FULL OUTER JOIN ON USERID SO THAT WE KEEP EVEN THE NON-ACTIVE ACCOUNT USERID'S
+        FULL OUTER JOIN VIEWERSHIP AS V
+        ON U.USERID = V."userid"
+) ,
+CTE1 AS (
+        SELECT USERID, 
+        ----CHANGING THE 'NONE' VALUES TO NULL THEN TO 'NOT SPECIFIED'
+               IFNULL(NULLIF(GENDER, 'None'), 'Not Specified') as GENDER,
+               IFNULL(NULLIF(RACE, 'None') , 'Not Specified') AS RACE,
+               AGE,
+               IFNULL(NULLIF(PROVINCE, 'None'), 'Not Specified') AS PROVINCE,
+               CHANNEL2,
+               RECORD_DATE,
+               RECORD_TIME,
+               DURATION
+        FROM CTE
+) ,
+CTE2 AS (
+        SELECT USERID,
+               GENDER,
+               RACE,
+               AGE,
+        ----USING CASE STATEMENT TO BUCKET AGE GROUPS
+               CASE
+                   WHEN IFNULL(AGE,0) BETWEEN 0 AND 12 THEN 'Child'
+                   WHEN IFNULL(AGE,0) BETWEEN 13 AND 19 THEN 'Teenager'
+                   WHEN IFNULL(AGE,0) BETWEEN 20 AND 35 THEN 'Youth'
+                   WHEN IFNULL(AGE,0) BETWEEN 36 AND 59 THEN 'Adult'
+                   WHEN IFNULL(AGE,0) >59 THEN 'Senior'
+              END AS AGE_GROUP,                                                                                                                                                                                                                                                            
+               PROVINCE,
+               CHANNEL2,
+               RECORD_DATE,
+               RECORD_TIME,
+               DURATION,
+        ----USING THE DURATION COLUMN TO CALCULATE TOTAL MINUTES PER RECORD
+               IFNULL((DATE_PART(HOUR,DURATION)*60 + DATE_PART(MINUTE, DURATION) + DATE_PART(SECOND, DURATION)/60), 0) AS MINUTES_WATCHED,
+               CASE 
+                   WHEN RECORD_TIME BETWEEN '00:00:00' AND '06:59:59' THEN 'Dawn'
+                   WHEN RECORD_TIME BETWEEN '07:00:00' AND '11:59:59' THEN 'Morning'
+                   WHEN RECORD_TIME BETWEEN '12:00:00' AND '17:59:59' THEN 'Afternoon'
+                   WHEN RECORD_TIME BETWEEN '18:00:00' AND '21:59:59' THEN 'Evening'
+                   ELSE 'Night'                                                                                   
+               END AS DAY_PERIOD
+        FROM CTE1
+),
+CTE3 AS (
+        SELECT *,
+        ----USING ROW NUMBER WINDOW FUNCTION TO BE ABLE TO IDENTIFY DUPLICATES. IF THERE'S MORE THAN 1 RECORD WITH SAME USERID, RECORD_DATE, RECORD_TIME, DURATION THEN THAT IS A DUPLICATE
+               ROW_NUMBER()OVER( PARTITION BY USERID, RECORD_DATE, RECORD_TIME, DURATION ORDER BY USERID) AS ROW_NUM
+        FROM CTE2
+)
+SELECT *
+FROM CTE3;
+
+
+
+
+---- CREATING THE CLEAN DATA WITH BOTH TABLES JOINED AS A NEW TABLE
+CREATE OR REPLACE TABLE TV_CLEAN AS (
+WITH CTE AS (
+        SELECT U.USERID, 
+               TRIM(INITCAP(GENDER)) AS GENDER, 
+               TRIM(INITCAP(RACE)) AS RACE, 
+               AGE, 
+               TRIM(INITCAP(PROVINCE)) AS PROVINCE, 
+               TRIM(INITCAP(CHANNEL2)) AS CHANNEL2, 
+               TO_DATE(REPLACE(LEFT(RECORDDATE2, 10),'/','-')) AS RECORD_DATE,
+               CAST(RIGHT(RECORDDATE2, 5) AS TIME) AS RECORD_TIME,
+               DURATION_2 AS DURATION
+        FROM USER_PROFILES AS U
+        FULL OUTER JOIN VIEWERSHIP AS V
+        ON U.USERID = V."userid"
+) ,
+CTE1 AS (
+        SELECT USERID, 
+               IFNULL(NULLIF(GENDER, 'None'), 'Not Specified') as GENDER,
+               IFNULL(NULLIF(RACE, 'None') , 'Not Specified') AS RACE,
+               AGE,
+               IFNULL(NULLIF(PROVINCE, 'None'), 'Not Specified') AS PROVINCE,
+               CHANNEL2,
+               RECORD_DATE,
+               RECORD_TIME,
+               DURATION
+        FROM CTE
+) ,
+CTE2 AS (
+        SELECT USERID,
+               GENDER,
+               RACE,
+               AGE,
+               CASE
+                   WHEN IFNULL(AGE,0) BETWEEN 0 AND 12 THEN 'Child'
+                   WHEN IFNULL(AGE,0) BETWEEN 13 AND 19 THEN 'Teenager'
+                   WHEN IFNULL(AGE,0) BETWEEN 20 AND 35 THEN 'Youth'
+                   WHEN IFNULL(AGE,0) BETWEEN 36 AND 59 THEN 'Adult'
+                   WHEN IFNULL(AGE,0) >59 THEN 'Senior'
+              END AS AGE_GROUP,                                                                                                                                                                                                                                                            
+               PROVINCE,
+               CHANNEL2,
+               RECORD_DATE,
+               RECORD_TIME,
+               DURATION,
+               IFNULL((DATE_PART(HOUR,DURATION)*60 + DATE_PART(MINUTE, DURATION) + DATE_PART(SECOND, DURATION)/60), 0) AS DURATION_MINUTES,
+               CASE 
+                   WHEN RECORD_TIME BETWEEN '00:00:00' AND '06:59:59' THEN 'Dawn'
+                   WHEN RECORD_TIME BETWEEN '07:00:00' AND '11:59:59' THEN 'Morning'
+                   WHEN RECORD_TIME BETWEEN '12:00:00' AND '17:59:59' THEN 'Afternoon'
+                   WHEN RECORD_TIME BETWEEN '18:00:00' AND '21:59:59' THEN 'Evening'
+                   ELSE 'Night'                                                                                   
+               END AS DAY_PERIOD
+        FROM CTE1
+),
+CTE3 AS (
+        SELECT *,
+               ROW_NUMBER()OVER( PARTITION BY USERID, RECORD_DATE, RECORD_TIME, DURATION ORDER BY USERID) AS ROW_NUM
+        FROM CTE2
+)
+---- ADDING A COLUMN TO SHOW INTEREST IN THE SHOW BEING WATCHED BASED ON TOTAL MINUTES PER RECORD, LESS THAN 10 MINUTES AS LOW INTEREST, BETWEEN 10 AND 30 MINUTES AS INTERESTED, MORE THAN 30 MINUTES AS EXTREMELY INTERESTED 
+SELECT *, CASE 
+           WHEN DURATION_MINUTES < 10 THEN 'Not Interested'
+           WHEN DURATION_MINUTES BETWEEN 10 AND 30 THEN 'Interested'
+           ELSE 'Extremely Interested'
+       END AS CHANNEL_INTEREST
+FROM CTE3
+);
+
+----DELETING DUPLICATES
+DELETE FROM TV_CLEAN
+WHERE ROW_NUM >1;
+
+----REMOVE THE ROW_NUM COLUMN
+ALTER TABLE TV_CLEAN
+DROP COLUMN ROW_NUM;
+
+----REMOVE DURATION COLUMN BECAUSE WE HAVE DURATION IN MINUTES
+ALTER TABLE TV_CLEAN
+DROP COLUMN DURATION;
